@@ -1,0 +1,448 @@
+
+
+module dataModule
+implicit double precision(a-h,m-z)
+DOUBLE PRECISION FH1_mu,FH1_sigma1,FH1_sigma2
+DOUBLE PRECISION FH2_mu,FH2_sigma1,FH2_sigma2
+real*8, dimension(3) :: g0=(/(i,i=1,3)/)
+real*8, dimension(3) :: gH1=(/(i,i=1,3)/)
+real*8, dimension(3) :: gH2=(/(i,i=1,3)/)
+real*8, dimension(3) :: g1_const=(/(i,i=1,3)/)
+real*8, dimension(3) :: g1_rr=(/(i,i=1,3)/)
+
+! Huber points
+data tHuber1/-1.6d0/
+data tHuber2/-2.45d0/
+
+! I_value
+data valI/0.600354d0/ ! for Weight=1, k=2
+
+! # of energy points from threshold to 0.63GeV
+data length_tnum1/57/ ! MAY BE CHANGED
+data i_number_of_points_expt_data/221/ ! MAY BE CHANGED
+data length_tnumStable_start/96/ ! MAY BE CHANGED
+data length_tnumStable_end/121/  ! MAY BE CHANGED
+data Mpi/0.13957018d0/
+
+data tpi/0.0779193d0/ !4*Mpi^2=4*0.13957018d0
+data tin/0.837633139729d0/
+
+DATA FH1_mu/0.243d0/
+DATA FH1_sigma_up/0.0224722d0/ !Sqrt[0.012^2 + 0.019^2]
+DATA FH1_sigma_dn/0.0144222d0/ !Sqrt[0.012^2 + 0.008^2]
+DATA FH2_mu/0.167d0/
+DATA FH2_sigma_up/0.0164012d0/ !Sqrt[0.010^2 + 0.013^2]
+DATA FH2_sigma_dn/0.0122066d0/ !Sqrt[0.010^2 + 0.007^2]
+
+! ======================================================================
+! ALL DATA IN THIS BLOCK MAY BE CHANGED
+data g0(1)/0.333456d0/,g0(2)/0.322219d0/,g0(3)/0.345083d0/
+data gH1(1)/0.742198d0/, gH1(2)/0.728568d0/, gH1(3)/0.756083d0/
+data gH2(1)/0.87089d0/, gH2(2)/0.85722d0/, gH2(3)/0.884778d0/
+data g1_const(1)/-1.47842d0/,g1_const(2)/-1.45786d0/
+data g1_const(3)/-1.49864d0/
+data g1_rr(1)/4.7822d0/,g1_rr(2)/4.62106d0/,g1_rr(3)/4.94896d0/
+! ======================================================================
+
+! Data for isospin factor calculation
+data momega/0.7826/
+data Gammaomega/0.0085d0/
+data data_kappa/-0.0019/
+
+end module dataModule
+
+
+include 'CoefxxSq.f90'
+include 'random.f90'
+include 'binning1D.f90'
+
+
+!***********************************************************************
+program BernBabarH1H2
+use dataModule
+implicit double precision(a-h,m-z)
+real*8 term1, term2, term3
+real*8 ggQ2Cent(57)
+real*8 ggQ2Max(57)
+real*8 ggQ2Min(57)
+real*8 ggQ2(3,57)
+real*8 tnum1(57)
+real*8 tnumStable(221)
+real*8 expt_VP_removed_cent(221),expt_VP_removed_err(221)
+real*8 ggQ2StableCent(221)
+real*8 ggQ2StableMax(221)
+real*8 ggQ2StableMin(221)
+real*8 ggQ2Stable(3,221)
+real*8 FmodCent(221),FmodErr(221)
+complex*8 a(3),roots(2)
+ character*80 f10
+real*8 bound_up(3000000), bound_dn(3000000)
+integer number_of_solns, n_bins, n_1st_2nd_column
+real*8 confidence_limit, up, dn
+external zroots, laguer
+external binning1D
+
+
+! Following is the energy points from threshold to 0.63
+do i=1,length_tnum1
+tnum1(i)=2.d0*Mpi+0.0063d0*(i-1)
+enddo
+	
+! Reading the ggQ2 data
+open(unit=20,file='Bern_ggQ2Cent.dat',status='old',action='read')
+read(20,*)(ggQ2Cent(i),i=1,length_tnum1)
+ close(20)
+	
+open(unit=20,file='Bern_ggQ2Max.dat',status='old',action='read')
+read(20,*)(ggQ2Max(i),i=1,length_tnum1)
+ close(20)
+
+open(unit=20,file='Bern_ggQ2Min.dat',status='old',action='read')
+read(20,*)(ggQ2Min(i),i=1,length_tnum1)
+ close(20)
+
+
+! Combine the ggQ2Cent, ggQ2Max and ggQ2Min into ggQ2 
+do i1=1,3
+do i2=1,length_tnum1
+if(i1.eq.1)then
+ggQ2(i1,i2)=ggQ2Cent(i2)
+elseif(i1.eq.2)then
+ggQ2(i1,i2)=ggQ2Max(i2)
+elseif(i1.eq.3)then
+ggQ2(i1,i2)=ggQ2Min(i2)
+endif
+enddo
+enddo
+
+
+
+! Here read the Babar_VP_removed.dat data file
+open(unit=20,file='BaBar_VP_removed.dat',status='old', action='read')
+read(20,*)(tnumStable(i),expt_VP_removed_cent(i),expt_VP_removed_err(i),i=1,i_number_of_points_expt_data)
+ close(20)
+	
+! Calculation of FmodStable. FmodStable has gaussian distribution.
+! Following are the mean and the standard deviation
+
+!      Checked...correct
+do i=1,i_number_of_points_expt_data
+FmodCent(i)=dsqrt(expt_VP_removed_cent(i)) / factorIso(tnumStable(i)**2)
+enddo
+!	Checked...correct
+do i=1,i_number_of_points_expt_data
+FmodErr(i)=( expt_VP_removed_err(i)/2.d0/dsqrt(expt_VP_removed_cent(i)) )/factorIso(tnumStable(i)**2 )
+enddo
+
+
+
+! Reading the ggq2Stable data...get the data on file from Mathematica 
+open(unit=20,file='Bern_Babar_ggQ2StableCent.dat',status='old',action='read')
+read(20,*)(ggQ2StableCent(i),i=1,i_number_of_points_expt_data)
+ close(20)
+
+open(unit=20,file='Bern_Babar_ggQ2StableMax.dat',status='old',action='read')
+read(20,*)(ggQ2StableMax(i),i=1,i_number_of_points_expt_data)
+ close(20)
+
+open(unit=20,file='Bern_Babar_ggQ2StableMin.dat',status='old',action='read')
+read(20,*)(ggQ2StableMin(i),i=1,i_number_of_points_expt_data)
+ close(20)
+
+do i1=1,3
+do i2=1,i_number_of_points_expt_data
+if(i1.eq.1)then
+ggQ2Stable(i1,i2)=ggQ2StableCent(i2)
+elseif(i1.eq.2)then
+ggQ2Stable(i1,i2)=ggQ2StableMax(i2)
+elseif(i1.eq.3)then
+ggQ2Stable(i1,i2)=ggQ2StableMin(i2)
+endif
+enddo
+enddo
+
+
+
+
+
+!#######################################################################
+!#######################################################################
+!#######################################################################
+
+
+! For the first Huber point
+! ======================================================================
+number_of_solns=0
+do i2=length_tnumStable_start,length_tnumStable_end
+bound_up_max_min=100.d0
+bound_dn_min_max=-100.d0
+do i1=1,length_tnum1
+bound_up_max=-100.d0
+bound_dn_min=100.d0
+do i3=1,3 !cent, max, min
+do i4=1,100000 !dummy loop begins
+rSq=ZBQLUAB(0.41d0,0.45d0) !r^2 between A and B
+FH=SPLIT(FH1_mu,FH1_sigma_up,FH1_sigma_dn)
+g1=g1_const(i3)+g1_rr(i3)*rSq
+FmodStable=ZBQLNOR(FmodCent(i2),FmodErr(i2))
+zHuber=Conformal(tHuber1)
+! The coefficient of xx^0
+term1=CoefCnst(rSq,FH,g0(i3),g1,gH1(i3),ggQ2(i3,i1),tnum1(i1)*tnum1(i1),ggQ2Stable(i3,i2), &
+tnumStable(i2)*tnumStable(i2),FmodStable,zHuber,valI)
+! The coefficient of xx^1
+term2=Coefxx(rSq,FH,g0(i3),g1,gH1(i3),ggQ2(i3,i1),tnum1(i1)*tnum1(i1),ggQ2Stable(i3,i2),   &
+tnumStable(i2)*tnumStable(i2),FmodStable,zHuber,valI)
+! The coefficient of xx^2
+term3=CoefxxSq(rSq,FH,g0(i3),g1,gH1(i3),ggQ2(i3,i1),tnum1(i1)*tnum1(i1),ggQ2Stable(i3,i2), &
+tnumStable(i2)*tnumStable(i2),FmodStable,zHuber,valI)
+		
+a(1)=cmplx(term1,0.d0)
+a(2)=cmplx(term2,0.d0)
+a(3)=cmplx(term3,0.d0)
+call zroots(a,2,roots,.true.)
+	
+! if the roots are real then continue, else skip
+if(aimag(roots(1)).eq.0)then
+number_of_solns=number_of_solns+1
+bound_up(number_of_solns)=max(real(roots(1)),real(roots(2)))
+bound_dn(number_of_solns)=min(real(roots(1)),real(roots(2)))
+
+
+endif
+enddo !dummy loopends
+enddo !phase
+ close(19)
+
+
+n_bins=100
+confidence_limit=0.68d0
+
+call binning1D(bound_up, number_of_solns, n_bins, confidence_limit, up, dn)
+bound_up_max=up
+
+call binning1D(bound_dn, number_of_solns, n_bins, confidence_limit, up, dn)
+bound_dn_min=dn
+	
+write(*,*)up,dn
+! write bounds for individual timelike points in stable region
+write(f10,'(A,I3.3,A)') "modulus_Bern_BaBar_H1_pt",i2,".dat"
+open(29,file=f10,status='unknown')
+write(29,*)tnum1(i1),bound_up_max,bound_dn_min
+
+number_of_solns=0
+
+enddo
+ close(29)
+
+  	
+enddo
+! ======================================================================
+
+
+
+
+number_of_solns=0
+! For the second Huber point
+! ======================================================================
+	!do i1=1,length_tnum1
+do i2=length_tnumStable_start,length_tnumStable_end
+bound_up_max_min=100.d0
+bound_dn_min_max=-100.d0
+do i1=1,length_tnum1
+bound_up_max=-100.d0
+bound_dn_min=100.d0
+do i3=1,3 !cent, max, min
+do i4=1,100000 !dummy loop begins
+rSq=ZBQLUAB(0.41d0,0.45d0) !r^2 between A and B
+FH=SPLIT(FH2_mu,FH2_sigma_up,FH2_sigma_dn)
+g1=g1_const(i3)+g1_rr(i3)*rSq
+FmodStable=ZBQLNOR(FmodCent(i2),FmodErr(i2))
+zHuber=Conformal(tHuber2)
+! The coefficient of xx^0
+term1=CoefCnst(rSq,FH,g0(i3),g1,gH2(i3),ggQ2(i3,i1),tnum1(i1)*tnum1(i1),ggQ2Stable(i3,i2), &
+tnumStable(i2)*tnumStable(i2),FmodStable,zHuber,valI)
+! The coefficient of xx^1
+term2=Coefxx(rSq,FH,g0(i3),g1,gH2(i3),ggQ2(i3,i1),tnum1(i1)*tnum1(i1),ggQ2Stable(i3,i2), &
+tnumStable(i2)*tnumStable(i2),FmodStable,zHuber,valI)
+! The coefficient of xx^2
+term3=CoefxxSq(rSq,FH,g0(i3),g1,gH2(i3),ggQ2(i3,i1),tnum1(i1)*tnum1(i1),ggQ2Stable(i3,i2), &
+tnumStable(i2)*tnumStable(i2),FmodStable,zHuber,valI)
+	
+	
+a(1)=cmplx(term1,0.d0)
+a(2)=cmplx(term2,0.d0)
+a(3)=cmplx(term3,0.d0)
+call zroots(a,2,roots,.true.)
+
+	
+! if the roots are real then continue, else skip
+if(aimag(roots(1)).eq.0)then
+number_of_solns=number_of_solns+1
+bound_up(number_of_solns)=max(real(roots(1)),real(roots(2)))
+bound_dn(number_of_solns)=min(real(roots(1)),real(roots(2)))
+
+endif
+enddo !dummy loopends
+enddo !phase
+ close(19)
+
+
+n_bins=100
+confidence_limit=0.68d0
+
+call binning1D(bound_up, number_of_solns, n_bins, confidence_limit, up, dn)
+bound_up_max=up
+
+call binning1D(bound_dn, number_of_solns, n_bins, confidence_limit, up, dn)
+bound_dn_min=dn
+	
+write(*,*)up,dn
+! write bounds for individual timelike points in stable region
+write(f10,'(A,I3.3,A)') "modulus_Bern_BaBar_H2_pt",i2,".dat"
+open(29,file=f10,status='unknown')
+write(29,*)tnum1(i1),bound_up_max,bound_dn_min
+
+number_of_solns=0
+
+enddo
+ close(29)
+enddo
+
+
+
+
+
+
+
+! ======================================================================
+stop
+end
+
+
+
+subroutine zroots(a,m,roots,polish)
+INTEGER m,MAXM
+REAL EPS
+COMPLEX a(m+1),roots(m)
+LOGICAL polish
+PARAMETER (EPS=1.e-6,MAXM=101)
+INTEGER i,j,jj,its
+COMPLEX ad(MAXM),x,b,c
+!	external laguer
+do j=1,m+1 
+ad(j)=a(j)
+
+enddo 
+do j=m,1,-1 
+x=cmplx(0.,0.) 
+call laguer(ad,j,x,its)
+if(abs(aimag(x)).le.2.*EPS**2*abs(real(x))) x=cmplx(real(x),0.)
+
+roots(j)=x
+b=ad(j+1) 
+do jj=j,1,-1
+c=ad(jj)
+ad(jj)=b
+b=x*b+c
+enddo 
+enddo 
+if (polish) then
+do j=1,m 
+call laguer(a,m,roots(j),its)
+enddo 
+endif
+do j=2,m 
+x=roots(j)
+do i=j-1,1,-1
+if(real(roots(i)).le.real(x))goto 10
+roots(i+1)=roots(i)
+enddo 
+i=0
+10     roots(i+1)=x
+enddo 
+return
+END
+
+
+SUBROUTINE laguer(a,m,x,its)
+INTEGER m,its,MAXIT,MR,MT
+REAL EPSS
+COMPLEX a(m+1),x
+PARAMETER (EPSS=2.e-7,MR=8,MT=10,MAXIT=MT*MR)
+
+INTEGER iter,j
+REAL abx,abp,abm,err,frac(MR)
+COMPLEX dx,x1,b,d,f,g,h,sq,gp,gm,g2
+SAVE frac
+DATA frac /.5,.25,.75,.13,.38,.62,.88,1./ 
+do  iter=1,MAXIT 
+its=iter
+b=a(m+1)
+err=abs(b)
+d=cmplx(0.,0.)
+f=cmplx(0.,0.)
+abx=abs(x)
+do j=m,1,-1 
+f=x*f+d /2.
+d=x*d+b
+b=x*b+a(j)
+err=abs(b)+abx*err
+enddo 
+err=EPSS*err 
+if(abs(b).le.err) then 
+return
+else 
+g=d/b
+g2=g*g
+h=g2-2.*f/b
+sq=sqrt((m-1)*(m*h-g2))
+gp=g+sq
+gm=g-sq
+abp=abs(gp)
+abm=abs(gm)
+if(abp.lt.abm) gp=gm
+if (max(abp,abm).gt.0.) then
+dx=m/gp
+else
+dx=exp(cmplx(log(1.+abx),float(iter)))
+endif
+endif
+x1=x-dx
+if(x.eq.x1)return 
+if (mod(iter,MT).ne.0) then
+x=x1
+else 
+x=x-dx*frac(iter/MT) 
+endif
+enddo 
+!	pause 'too many iterations in laguer'
+return 
+END
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
